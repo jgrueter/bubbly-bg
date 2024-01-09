@@ -1,64 +1,86 @@
-window.bubbly = function (config) {
-    const c = config || {};
-    const r = () => Math.random();
-    const canvas = c.canvas || document.createElement("canvas");
-    let width = canvas.width;
-    let height = canvas.height;
-    if (canvas.parentNode === null) {
+window.bubbly = function (userConfig = {}) {
+    // we need to create a canvas element if the user didn't provide one
+    const cv = userConfig.canvas ?? (() => {
+        let canvas = document.createElement("canvas");
         canvas.setAttribute("style", "position:fixed;z-index:-1;left:0;top:0;min-width:100vw;min-height:100vh;");
-        width = canvas.width = window.innerWidth;
-        height = canvas.height = window.innerHeight;
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
         document.body.appendChild(canvas);
+        return canvas;
+    })();
+    const ctx = cv.getContext("2d");
+    // we destructure the config object (with default values as fallback)
+    const {compose, bubbles, background, animate} = {
+        compose: userConfig.compose ?? "lighter",
+        bubbles: Object.assign({ // default values
+            count: Math.floor((cv.width + cv.height) * 0.02),
+            radius: () => 4 + Math.random() * window.innerWidth / 25,
+            fill: () => `hsla(0, 0%, 100%, ${Math.random() * 0.1})`,
+            angle: () => Math.random() * Math.PI * 2,
+            velocity: () => 0.1 + Math.random() * 0.5,
+            shadow: () => null, // ({blur: 4, color: "#fff"})
+            stroke: () => null, // ({width: 2, color: "#fff"})
+        }, userConfig.bubbles ?? {}),
+        background: userConfig.background ?? (() => "#2AE"),
+        animate: userConfig.animate !== false,
     }
-    const context = canvas.getContext("2d");
-    context.shadowColor = c.shadowColor || "#fff";
-    context.shadowBlur = c.blur || 4;
-    const gradient = context.createLinearGradient(0, 0, width, height);
-    gradient.addColorStop(0, c.colorStart || "#2AE");
-    gradient.addColorStop(1, c.colorStop || "#17B");
-    const nrBubbles = c.bubbles || Math.floor((width + height) * 0.02);
-    const bubbles = [];
-    for (let i = 0; i < nrBubbles; i++) {
-        bubbles.push({
-            f: (c.bubbleFunc || (() => `hsla(0, 0%, 100%, ${r() * 0.1})`)).call(), // fillStyle
-            x: r() * width, // x-position
-            y: r() * height, // y-position
-            r: (c.radiusFunc || (() => 4 + r() * width / 25)).call(), // radius
-            a: (c.angleFunc || (() => r() * Math.PI * 2)).call(), // angle
-            v: (c.velocityFunc || (() => 0.1 + r() * 0.5)).call() // velocity
-        });
-    }
-    (function draw() {
-        if (canvas.parentNode === null) {
-            return cancelAnimationFrame(draw)
+    // this function contains a lot of references to its parent scope,
+    // so it must be defined after the config is created
+    bubbles.objectCreator = userConfig.bubbles?.objectCreator ?? (() => ({
+        r: bubbles.radius(),
+        f: bubbles.fill(),
+        x: Math.random() * cv.width,
+        y: Math.random() * cv.height,
+        a: bubbles.angle(),
+        v: bubbles.velocity(),
+        sh: bubbles.shadow(),
+        st: bubbles.stroke(),
+        draw: (ctx, bubble) => {
+            if (bubble.sh) {
+                ctx.shadowColor = bubble.sh.color;
+                ctx.shadowBlur = bubble.sh.blur;
+            }
+            ctx.fillStyle = bubble.f;
+            ctx.beginPath();
+            ctx.arc(bubble.x, bubble.y, bubble.r, 0, Math.PI * 2);
+            ctx.fill();
+            if (bubble.st) {
+                ctx.strokeStyle = bubble.st.color;
+                ctx.lineWidth = bubble.st.width;
+                ctx.stroke();
+            }
         }
-        if (c.animate !== false) {
+    }));
+    let bubbleArray = Array.from({length: bubbles.count}, bubbles.objectCreator);
+    requestAnimationFrame(draw);
+    function draw() {
+        if (cv.parentNode === null) {
+            bubbleArray = [];
+            return cancelAnimationFrame(draw);
+        }
+        if (animate) {
             requestAnimationFrame(draw);
         }
-        context.globalCompositeOperation = "source-over";
-        context.fillStyle = gradient;
-        context.fillRect(0, 0, width, height);
-        context.globalCompositeOperation = c.compose || "lighter";
-        bubbles.forEach(bubble => {
-            context.beginPath();
-            context.arc(bubble.x, bubble.y, bubble.r, 0, Math.PI * 2);
-            context.fillStyle = bubble.f;
-            context.fill();
-            // update positions for next draw
+        ctx.globalCompositeOperation = "source-over";
+        ctx.fillStyle = background(ctx);
+        ctx.fillRect(0, 0, cv.width, cv.height);
+        ctx.globalCompositeOperation = compose;
+        for (const bubble of bubbleArray) {
+            bubble.draw(ctx, bubble);
             bubble.x += Math.cos(bubble.a) * bubble.v;
             bubble.y += Math.sin(bubble.a) * bubble.v;
-            if (bubble.x - bubble.r > width) {
+            if (bubble.x - bubble.r > cv.width) {
                 bubble.x = -bubble.r;
             }
             if (bubble.x + bubble.r < 0) {
-                bubble.x = width + bubble.r;
+                bubble.x = cv.width + bubble.r;
             }
-            if (bubble.y - bubble.r > height) {
+            if (bubble.y - bubble.r > cv.height) {
                 bubble.y = -bubble.r;
             }
             if (bubble.y + bubble.r < 0) {
-                bubble.y = height + bubble.r;
+                bubble.y = cv.height + bubble.r;
             }
-        });
-    })();
+        }
+    }
 };
